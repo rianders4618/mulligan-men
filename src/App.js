@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
-import { ref, onValue, set, update, runTransaction } from "firebase/database";
+#import { ref, onValue, set, update, runTransaction } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 
 // ─── Tournament Config ────────────────────────────────────────
 const PLAYERS = [
