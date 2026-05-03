@@ -20,6 +20,7 @@ const COURSES = [
 
 const PAR = 72;
 const YEAR = "2025";
+const ADMIN_PIN = "1234";
 
 // ─── Helpers ──────────────────────────────────────────────────
 function getFlightLabel(rank, total) {
@@ -76,6 +77,10 @@ export default function App() {
   const [saving, setSaving]             = useState(false);
   const [toast, setToast]               = useState(null);
   const [lastUpdated, setLastUpdated]   = useState(null);
+  const [adminMode, setAdminMode]       = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput]         = useState("");
+  const [showResetConfirm, setShowResetConfirm] = useState(null); // { type, label, round?, playerId? }
   const toastTimer = useRef(null);
 
   // ── Firebase: listen for real-time updates ──────────────────
@@ -204,6 +209,80 @@ export default function App() {
     }
   }
 
+  // ── Admin: verify PIN ────────────────────────────────────────
+  function handlePinSubmit() {
+    if (pinInput === ADMIN_PIN) {
+      setAdminMode(true);
+      setShowPinModal(false);
+      setPinInput("");
+      showToast("Admin access granted");
+    } else {
+      showToast("Incorrect PIN", "error");
+      setPinInput("");
+    }
+  }
+
+  // ── Admin: clear scores for a specific round ───────────────
+  async function clearRoundScores(roundIndex) {
+    setSaving(true);
+    try {
+      const updates = {};
+      players.forEach((p) => {
+        const newScores = [...(p.scores ?? [null, null, null, null])];
+        newScores[roundIndex] = null;
+        updates[`mulligan-men-${YEAR}/players/${p.id}/scores`] = newScores;
+      });
+      updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+      await update(ref(db), updates);
+      showToast(`Round ${roundIndex + 1} scores cleared`);
+    } catch (e) {
+      showToast("Error clearing round scores", "error");
+    } finally {
+      setSaving(false);
+      setShowResetConfirm(null);
+    }
+  }
+
+  // ── Admin: clear ALL scores ─────────────────────────────────
+  async function clearAllScores() {
+    setSaving(true);
+    try {
+      const updates = {};
+      players.forEach((p) => {
+        updates[`mulligan-men-${YEAR}/players/${p.id}/scores`] = [null, null, null, null];
+        updates[`mulligan-men-${YEAR}/players/${p.id}/flight`] = null;
+      });
+      updates[`mulligan-men-${YEAR}/flighted`] = false;
+      updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+      await update(ref(db), updates);
+      showToast("All scores cleared");
+    } catch (e) {
+      showToast("Error clearing scores", "error");
+    } finally {
+      setSaving(false);
+      setShowResetConfirm(null);
+    }
+  }
+
+  // ── Admin: clear a specific player's scores ────────────────
+  async function clearPlayerScores(playerId) {
+    setSaving(true);
+    try {
+      const updates = {};
+      updates[`mulligan-men-${YEAR}/players/${playerId}/scores`] = [null, null, null, null];
+      updates[`mulligan-men-${YEAR}/players/${playerId}/flight`] = null;
+      updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+      await update(ref(db), updates);
+      const player = players.find((p) => p.id === playerId);
+      showToast(`${player.name}'s scores cleared`);
+    } catch (e) {
+      showToast("Error clearing player scores", "error");
+    } finally {
+      setSaving(false);
+      setShowResetConfirm(null);
+    }
+  }
+
   // ── Edit score handlers ─────────────────────────────────────
   function openEdit(player) {
     setEditingPlayer(player.id);
@@ -322,8 +401,25 @@ export default function App() {
       }}>
         <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 0 0" }}>
 
-          {/* Connection + saving status */}
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+          {/* Connection + saving status + admin */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            {adminMode ? (
+              <button className="btn" onClick={() => { setAdminMode(false); setActiveTab("leaderboard"); }} style={{
+                background: "none", border: "none", padding: 0,
+                fontFamily: "'Lato', sans-serif", fontSize: 9, letterSpacing: "0.1em",
+                color: "#ef4444", cursor: "pointer",
+              }}>
+                🔓 ADMIN · LOG OUT
+              </button>
+            ) : (
+              <button className="btn" onClick={() => setShowPinModal(true)} style={{
+                background: "none", border: "none", padding: 0,
+                fontFamily: "'Lato', sans-serif", fontSize: 9, letterSpacing: "0.1em",
+                color: "#4b5563", cursor: "pointer",
+              }}>
+                ⚙️
+              </button>
+            )}
             <span style={{
               fontFamily: "'Lato', sans-serif", fontSize: 9, letterSpacing: "0.1em",
               color: connected ? "#22c55e" : "#9ca3af",
@@ -387,6 +483,7 @@ export default function App() {
               { id: "leaderboard", label: "🏆 Board" },
               { id: "scores",      label: "✏️ Scores" },
               { id: "flights",     label: "🎯 Flights" },
+              ...(adminMode ? [{ id: "admin", label: "⚙️ Admin" }] : []),
             ].map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
                 flex: 1, padding: "10px 4px",
@@ -411,19 +508,12 @@ export default function App() {
         {/* ══ LEADERBOARD TAB ══ */}
         {activeTab === "leaderboard" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ marginBottom: 12 }}>
               <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 10, color: "#6b7280", letterSpacing: "0.15em", textTransform: "uppercase" }}>
                 {completedRounds > 0
                   ? `After ${completedRounds} Round${completedRounds > 1 ? "s" : ""}`
                   : "No scores yet"}
               </div>
-              <button className="btn" onClick={loadDemoData} disabled={saving} style={{
-                background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.35)",
-                color: "#d4af37", padding: "5px 12px", borderRadius: 4,
-                fontFamily: "'Lato', sans-serif", fontSize: 9, letterSpacing: "0.1em",
-              }}>
-                LOAD DEMO
-              </button>
             </div>
 
             {/* Column headers */}
@@ -616,6 +706,150 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ ADMIN TAB ══ */}
+        {activeTab === "admin" && adminMode && (
+          <div>
+            <div style={{
+              fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700,
+              color: "#d4af37", marginBottom: 4,
+            }}>
+              Admin Panel
+            </div>
+            <div style={{
+              fontFamily: "'Lato',sans-serif", fontSize: 11, color: "#9ca3af",
+              marginBottom: 20, letterSpacing: "0.08em",
+            }}>
+              Manage and reset tournament scores
+            </div>
+
+            {/* Load Demo Data */}
+            <div style={{
+              padding: "16px", marginBottom: 10, background: "rgba(212,175,55,0.04)",
+              borderRadius: 8, border: "1px solid rgba(212,175,55,0.15)",
+            }}>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+                color: "#d4af37", marginBottom: 4,
+              }}>
+                Load Demo Data
+              </div>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+              }}>
+                Populate all players with random scores for rounds 1–3. Useful for testing.
+              </div>
+              <button className="btn" onClick={loadDemoData} disabled={saving} style={{
+                background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.35)",
+                color: "#d4af37", padding: "8px 16px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+              }}>
+                LOAD DEMO
+              </button>
+            </div>
+
+            {/* Clear All Scores */}
+            <div style={{
+              padding: "16px", marginBottom: 10, background: "rgba(239,68,68,0.06)",
+              borderRadius: 8, border: "1px solid rgba(239,68,68,0.2)",
+            }}>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+                color: "#ef4444", marginBottom: 4,
+              }}>
+                Reset Entire Tournament
+              </div>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+              }}>
+                Clears all scores for all players across all rounds. Also resets flights.
+              </div>
+              <button className="btn" onClick={() => setShowResetConfirm({ type: "all", label: "ALL scores and flights" })} disabled={saving} style={{
+                background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
+                color: "#ef4444", padding: "8px 16px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+              }}>
+                CLEAR ALL SCORES
+              </button>
+            </div>
+
+            {/* Clear Round Scores */}
+            <div style={{
+              padding: "16px", marginBottom: 10, background: "rgba(249,115,22,0.06)",
+              borderRadius: 8, border: "1px solid rgba(249,115,22,0.2)",
+            }}>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+                color: "#f97316", marginBottom: 4,
+              }}>
+                Clear Round Scores
+              </div>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+              }}>
+                Clear all player scores for a specific round.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {COURSES.map((course, i) => {
+                  const hasScores = players.some((p) => p.scores[i] !== null);
+                  return (
+                    <button key={i} className="btn" onClick={() => setShowResetConfirm({ type: "round", round: i, label: `Round ${i + 1} (${course})` })} disabled={saving || !hasScores} style={{
+                      background: hasScores ? "rgba(249,115,22,0.12)" : "rgba(255,255,255,0.03)",
+                      border: `1px solid ${hasScores ? "rgba(249,115,22,0.35)" : "rgba(255,255,255,0.08)"}`,
+                      color: hasScores ? "#f97316" : "#4b5563",
+                      padding: "8px 14px", borderRadius: 6,
+                      fontFamily: "'Lato',sans-serif", fontSize: 10, fontWeight: 700,
+                    }}>
+                      R{i + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Clear Player Scores */}
+            <div style={{
+              padding: "16px", marginBottom: 10, background: "rgba(212,175,55,0.04)",
+              borderRadius: 8, border: "1px solid rgba(212,175,55,0.15)",
+            }}>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+                color: "#d4af37", marginBottom: 4,
+              }}>
+                Clear Player Scores
+              </div>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+              }}>
+                Clear all scores for a specific player.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {players.map((player) => {
+                  const hasScores = player.scores.some((s) => s !== null);
+                  return (
+                    <div key={player.id} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 6,
+                    }}>
+                      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 12, fontWeight: 700 }}>
+                        {player.name}
+                      </div>
+                      <button className="btn" onClick={() => setShowResetConfirm({ type: "player", playerId: player.id, label: player.name })} disabled={saving || !hasScores} style={{
+                        background: hasScores ? "rgba(212,175,55,0.12)" : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${hasScores ? "rgba(212,175,55,0.3)" : "rgba(255,255,255,0.06)"}`,
+                        color: hasScores ? "#d4af37" : "#4b5563",
+                        padding: "4px 10px", borderRadius: 4,
+                        fontFamily: "'Lato',sans-serif", fontSize: 9, fontWeight: 700,
+                      }}>
+                        {hasScores ? "CLEAR" : "—"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ══ FLIGHTS TAB ══ */}
         {activeTab === "flights" && (
           <div>
@@ -784,6 +1018,117 @@ export default function App() {
                 fontFamily:"'Lato',sans-serif", fontSize:12, fontWeight:700,
               }}>
                 CONFIRM
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN Modal ── */}
+      {showPinModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20,
+        }}>
+          <div style={{
+            background: "linear-gradient(160deg,#0d1f0e,#1a3a1c)",
+            border: "1px solid #d4af37", borderRadius: 12,
+            padding: 28, maxWidth: 300, width: "100%", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
+            <div style={{
+              fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 900,
+              color: "#d4af37", marginBottom: 8,
+            }}>
+              Admin Access
+            </div>
+            <div style={{
+              fontFamily: "'Lato',sans-serif", fontSize: 11, color: "#9ca3af",
+              marginBottom: 20,
+            }}>
+              Enter the admin PIN to continue
+            </div>
+            <input
+              type="password"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
+              placeholder="PIN"
+              maxLength={8}
+              style={{
+                width: "100%", padding: "12px", marginBottom: 16,
+                background: "#1a3a1c", border: "1px solid #d4af37",
+                borderRadius: 8, color: "#f5f0e8", textAlign: "center",
+                fontFamily: "'Lato',sans-serif", fontSize: 18, letterSpacing: "0.3em",
+              }}
+              autoFocus
+            />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn" onClick={() => { setShowPinModal(false); setPinInput(""); }} style={{
+                flex: 1, background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.14)", color: "#9ca3af",
+                padding: "12px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+              }}>
+                CANCEL
+              </button>
+              <button className="btn" onClick={handlePinSubmit} style={{
+                flex: 1, background: "linear-gradient(135deg,#d4af37,#b8960c)", color: "#0a1a0b",
+                padding: "12px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+              }}>
+                ENTER
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset Confirmation Modal ── */}
+      {showResetConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20,
+        }}>
+          <div style={{
+            background: "linear-gradient(160deg,#0d1f0e,#1a3a1c)",
+            border: "1px solid #ef4444", borderRadius: 12,
+            padding: 28, maxWidth: 340, width: "100%", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+            <div style={{
+              fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 900,
+              color: "#ef4444", marginBottom: 8,
+            }}>
+              Confirm Reset
+            </div>
+            <div style={{
+              fontFamily: "'Lato',sans-serif", fontSize: 12, color: "#9ca3af",
+              marginBottom: 24, lineHeight: 1.6,
+            }}>
+              You are about to clear: <strong style={{ color: "#f97316" }}>{showResetConfirm.label}</strong>
+              <br /><br />
+              This action cannot be undone and syncs live to all devices.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn" onClick={() => setShowResetConfirm(null)} style={{
+                flex: 1, background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.14)", color: "#9ca3af",
+                padding: "12px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+              }}>
+                CANCEL
+              </button>
+              <button className="btn" onClick={() => {
+                if (showResetConfirm.type === "all") clearAllScores();
+                else if (showResetConfirm.type === "round") clearRoundScores(showResetConfirm.round);
+                else if (showResetConfirm.type === "player") clearPlayerScores(showResetConfirm.playerId);
+              }} disabled={saving} style={{
+                flex: 1, background: "rgba(239,68,68,0.8)", color: "#fff",
+                padding: "12px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+              }}>
+                CLEAR
               </button>
             </div>
           </div>
