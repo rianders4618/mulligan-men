@@ -508,19 +508,12 @@ export default function App() {
         {/* ══ LEADERBOARD TAB ══ */}
         {activeTab === "leaderboard" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ marginBottom: 12 }}>
               <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 10, color: "#6b7280", letterSpacing: "0.15em", textTransform: "uppercase" }}>
                 {completedRounds > 0
                   ? `After ${completedRounds} Round${completedRounds > 1 ? "s" : ""}`
                   : "No scores yet"}
               </div>
-              <button className="btn" onClick={loadDemoData} disabled={saving} style={{
-                background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.35)",
-                color: "#d4af37", padding: "5px 12px", borderRadius: 4,
-                fontFamily: "'Lato', sans-serif", fontSize: 9, letterSpacing: "0.1em",
-              }}>
-                LOAD DEMO
-              </button>
             </div>
 
             {/* Column headers */}
@@ -727,6 +720,31 @@ export default function App() {
               marginBottom: 20, letterSpacing: "0.08em",
             }}>
               Manage and reset tournament scores
+            </div>
+
+            {/* Load Demo Data */}
+            <div style={{
+              padding: "16px", marginBottom: 10, background: "rgba(212,175,55,0.04)",
+              borderRadius: 8, border: "1px solid rgba(212,175,55,0.15)",
+            }}>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
+                color: "#d4af37", marginBottom: 4,
+              }}>
+                Load Demo Data
+              </div>
+              <div style={{
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+              }}>
+                Populate all players with random scores for rounds 1–3. Useful for testing.
+              </div>
+              <button className="btn" onClick={loadDemoData} disabled={saving} style={{
+                background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.35)",
+                color: "#d4af37", padding: "8px 16px", borderRadius: 6,
+                fontFamily: "'Lato',sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+              }}>
+                LOAD DEMO
+              </button>
             </div>
 
             {/* Clear All Scores */}
