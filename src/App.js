@@ -3,7 +3,9 @@ import { db } from "./firebase";
 import { ref, onValue, update } from "firebase/database";
 
 // ─── Tournament Config ────────────────────────────────────────
-const PLAYERS = [
+// Default roster — used only to seed Firebase on first run.
+// After that, the roster lives in Firebase and is managed via the admin panel.
+const DEFAULT_PLAYERS = [
   "Damien Bryant", "Rick Anderson", "Shon Davis", "Preston Alderman", "Nelson Brower",
   "TJ Brower", "Theron Brower", "Ron Fuller", "James Brunson", "Antonio Wilder",
   "Jeff Coleman", "Andre Springer", "Roscoe Bryant", "Chris Bryant", "Bernard Smith",
@@ -54,18 +56,9 @@ function getRandScore() {
   return Math.floor(Math.random() * 20) + 68;
 }
 
-// Build initial player objects from the PLAYERS array
-const buildInitialPlayers = () =>
-  PLAYERS.map((name, i) => ({
-    id: i,
-    name,
-    scores: [null, null, null, null],
-    flight: null,
-  }));
-
 // ─── App ──────────────────────────────────────────────────────
 export default function App() {
-  const [players, setPlayers]           = useState(buildInitialPlayers());
+  const [players, setPlayers]           = useState([]);
   const [currentRound, setCurrentRound] = useState(1);
   const [activeTab, setActiveTab]       = useState("leaderboard");
   const [editingPlayer, setEditingPlayer] = useState(null);
@@ -80,7 +73,9 @@ export default function App() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput]         = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(null); // { type, label, round?, playerId? }
+  const [newPlayerName, setNewPlayerName]       = useState("");
   const toastTimer = useRef(null);
+  const seeded = useRef(false);
 
   // ── Firebase: listen for real-time updates ──────────────────
   useEffect(() => {
@@ -92,20 +87,27 @@ export default function App() {
         setConnected(true);
         const data = snapshot.val();
         if (data && data.players) {
-          // Merge Firebase data with our local player list
-          // (in case new players were added to PLAYERS array)
-          const merged = buildInitialPlayers().map((p) => {
-            const remote = data.players[p.id];
-            if (!remote) return p;
-            return {
-              ...p,
-              scores: remote.scores ?? [null, null, null, null],
-              flight: remote.flight ?? null,
-            };
-          });
-          setPlayers(merged);
+          // Firebase is the source of truth — read players directly
+          const firebasePlayers = Object.entries(data.players).map(([id, p]) => ({
+            id: parseInt(id),
+            name: p.name ?? "",
+            scores: p.scores ?? [null, null, null, null],
+            flight: p.flight ?? null,
+          }));
+          setPlayers(firebasePlayers);
           setFlighted(data.flighted ?? false);
           if (data.lastUpdated) setLastUpdated(data.lastUpdated);
+        } else if (!seeded.current) {
+          // First run — seed Firebase from DEFAULT_PLAYERS
+          seeded.current = true;
+          const updates = {};
+          DEFAULT_PLAYERS.forEach((name, i) => {
+            updates[`mulligan-men-${YEAR}/players/${i}/name`]   = name;
+            updates[`mulligan-men-${YEAR}/players/${i}/scores`] = [null, null, null, null];
+            updates[`mulligan-men-${YEAR}/players/${i}/flight`] = null;
+          });
+          updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+          update(ref(db), updates);
         }
       },
       (error) => {
@@ -190,10 +192,10 @@ export default function App() {
     setSaving(true);
     try {
       const updates = {};
-      buildInitialPlayers().forEach((p) => {
+      players.forEach((p) => {
         updates[`mulligan-men-${YEAR}/players/${p.id}/scores`] =
           [getRandScore(), getRandScore(), getRandScore(), null];
-        updates[`mulligan-men-${YEAR}/players/${p.id}/name`] = p.name;
+        updates[`mulligan-men-${YEAR}/players/${p.id}/name`]   = p.name;
         updates[`mulligan-men-${YEAR}/players/${p.id}/flight`] = null;
       });
       updates[`mulligan-men-${YEAR}/flighted`]    = false;
@@ -205,6 +207,46 @@ export default function App() {
       showToast("Error loading demo", "error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ── Admin: add a player to the roster ──────────────────────
+  async function addPlayerToFirebase(name) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      const nextId = players.length > 0 ? Math.max(...players.map((p) => p.id)) + 1 : 0;
+      const updates = {};
+      updates[`mulligan-men-${YEAR}/players/${nextId}/name`]   = trimmed;
+      updates[`mulligan-men-${YEAR}/players/${nextId}/scores`] = [null, null, null, null];
+      updates[`mulligan-men-${YEAR}/players/${nextId}/flight`] = null;
+      updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+      await update(ref(db), updates);
+      setNewPlayerName("");
+      showToast(`${trimmed} added to roster`);
+    } catch (e) {
+      showToast("Error adding player", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Admin: remove a player from the roster ─────────────────
+  async function removePlayerFromFirebase(playerId) {
+    setSaving(true);
+    try {
+      const player = players.find((p) => p.id === playerId);
+      const updates = {};
+      updates[`mulligan-men-${YEAR}/players/${playerId}`] = null; // null deletes the node
+      updates[`mulligan-men-${YEAR}/lastUpdated`] = new Date().toISOString();
+      await update(ref(db), updates);
+      showToast(`${player?.name} removed from roster`);
+    } catch (e) {
+      showToast("Error removing player", "error");
+    } finally {
+      setSaving(false);
+      setShowResetConfirm(null);
     }
   }
 
@@ -440,7 +482,7 @@ export default function App() {
               fontFamily: "'Lato', sans-serif", fontSize: 11, letterSpacing: "0.28em",
               color: "#9ca3af", marginTop: 3, textTransform: "uppercase",
             }}>
-              Myrtle Beach · June {YEAR} · {PLAYERS.length} Players
+              Myrtle Beach · June {YEAR} · {players.length} Players
             </div>
             {lastUpdated && (
               <div style={{
@@ -805,7 +847,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Clear Player Scores */}
+            {/* Manage Roster */}
             <div style={{
               padding: "16px", marginBottom: 10, background: "rgba(212,175,55,0.04)",
               borderRadius: 8, border: "1px solid rgba(212,175,55,0.15)",
@@ -814,13 +856,39 @@ export default function App() {
                 fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
                 color: "#d4af37", marginBottom: 4,
               }}>
-                Clear Player Scores
+                Manage Roster
               </div>
               <div style={{
-                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 10,
+                fontFamily: "'Lato',sans-serif", fontSize: 10, color: "#9ca3af", marginBottom: 12,
               }}>
-                Clear all scores for a specific player.
+                Add or remove players. Changes sync live to all devices.
               </div>
+
+              {/* Add player */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <input
+                  type="text"
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addPlayerToFirebase(newPlayerName)}
+                  placeholder="Full name..."
+                  style={{
+                    flex: 1, padding: "8px 12px",
+                    background: "#1a3a1c", border: "1px solid rgba(212,175,55,0.4)",
+                    borderRadius: 6, color: "#f5f0e8",
+                    fontFamily: "'Lato',sans-serif", fontSize: 12,
+                  }}
+                />
+                <button className="btn" onClick={() => addPlayerToFirebase(newPlayerName)} disabled={saving || !newPlayerName.trim()} style={{
+                  background: "linear-gradient(135deg,#d4af37,#b8960c)", color: "#0a1a0b",
+                  padding: "8px 14px", borderRadius: 6,
+                  fontFamily: "'Lato',sans-serif", fontSize: 11, fontWeight: 700,
+                }}>
+                  ADD
+                </button>
+              </div>
+
+              {/* Player list */}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {players.map((player) => {
                   const hasScores = player.scores.some((s) => s !== null);
@@ -832,15 +900,30 @@ export default function App() {
                       <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 12, fontWeight: 700 }}>
                         {player.name}
                       </div>
-                      <button className="btn" onClick={() => setShowResetConfirm({ type: "player", playerId: player.id, label: player.name })} disabled={saving || !hasScores} style={{
-                        background: hasScores ? "rgba(212,175,55,0.12)" : "rgba(255,255,255,0.03)",
-                        border: `1px solid ${hasScores ? "rgba(212,175,55,0.3)" : "rgba(255,255,255,0.06)"}`,
-                        color: hasScores ? "#d4af37" : "#4b5563",
-                        padding: "4px 10px", borderRadius: 4,
-                        fontFamily: "'Lato',sans-serif", fontSize: 9, fontWeight: 700,
-                      }}>
-                        {hasScores ? "CLEAR" : "—"}
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn" onClick={() => setShowResetConfirm({ type: "player", playerId: player.id, label: player.name })} disabled={saving || !hasScores} style={{
+                          background: hasScores ? "rgba(212,175,55,0.12)" : "rgba(255,255,255,0.03)",
+                          border: `1px solid ${hasScores ? "rgba(212,175,55,0.3)" : "rgba(255,255,255,0.06)"}`,
+                          color: hasScores ? "#d4af37" : "#4b5563",
+                          padding: "4px 10px", borderRadius: 4,
+                          fontFamily: "'Lato',sans-serif", fontSize: 9, fontWeight: 700,
+                        }}>
+                          {hasScores ? "CLEAR" : "—"}
+                        </button>
+                        <button className="btn" onClick={() => setShowResetConfirm({
+                          type: "remove", playerId: player.id,
+                          label: player.name,
+                          hasScores,
+                        })} disabled={saving} style={{
+                          background: "rgba(239,68,68,0.1)",
+                          border: "1px solid rgba(239,68,68,0.3)",
+                          color: "#ef4444",
+                          padding: "4px 10px", borderRadius: 4,
+                          fontFamily: "'Lato',sans-serif", fontSize: 9, fontWeight: 700,
+                        }}>
+                          REMOVE
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -997,7 +1080,7 @@ export default function App() {
               fontFamily:"'Lato',sans-serif", fontSize:12, color:"#9ca3af",
               marginBottom:24, lineHeight:1.6,
             }}>
-              This splits {PLAYERS.length} players into 3 flights based on their 3-round totals.
+              This splits {players.length} players into 3 flights based on their 3-round totals.
               Flight A = best scores · B = middle · C = bottom third.
               <br/><br/>
               <strong style={{color:"#f97316"}}>This syncs live to all devices.</strong>
@@ -1105,9 +1188,20 @@ export default function App() {
               fontFamily: "'Lato',sans-serif", fontSize: 12, color: "#9ca3af",
               marginBottom: 24, lineHeight: 1.6,
             }}>
-              You are about to clear: <strong style={{ color: "#f97316" }}>{showResetConfirm.label}</strong>
-              <br /><br />
-              This action cannot be undone and syncs live to all devices.
+              {showResetConfirm.type === "remove" ? (
+                <>
+                  Remove <strong style={{ color: "#f97316" }}>{showResetConfirm.label}</strong> from the roster?
+                  {showResetConfirm.hasScores && (
+                    <><br /><br /><strong style={{ color: "#ef4444" }}>⚠️ This player has scores that will also be permanently deleted.</strong></>
+                  )}
+                </>
+              ) : (
+                <>
+                  You are about to clear: <strong style={{ color: "#f97316" }}>{showResetConfirm.label}</strong>
+                  <br /><br />
+                  This action cannot be undone and syncs live to all devices.
+                </>
+              )}
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn" onClick={() => setShowResetConfirm(null)} style={{
@@ -1122,12 +1216,13 @@ export default function App() {
                 if (showResetConfirm.type === "all") clearAllScores();
                 else if (showResetConfirm.type === "round") clearRoundScores(showResetConfirm.round);
                 else if (showResetConfirm.type === "player") clearPlayerScores(showResetConfirm.playerId);
+                else if (showResetConfirm.type === "remove") removePlayerFromFirebase(showResetConfirm.playerId);
               }} disabled={saving} style={{
                 flex: 1, background: "rgba(239,68,68,0.8)", color: "#fff",
                 padding: "12px", borderRadius: 6,
                 fontFamily: "'Lato',sans-serif", fontSize: 12, fontWeight: 700,
               }}>
-                CLEAR
+                {showResetConfirm.type === "remove" ? "REMOVE" : "CLEAR"}
               </button>
             </div>
           </div>
