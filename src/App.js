@@ -4,11 +4,10 @@ import { ref, onValue, update } from "firebase/database";
 
 // ─── Tournament Config ────────────────────────────────────────
 const PLAYERS = [
-  "Theron Brower", "Nelson Brower", "Chris Bryant", "Damien Bryant", "Roscoe Bryant",
-  "William Hamilton", "Clay Willett", "Jeff Coleman", "Carlton Shaw", "Rick Anderson",
-  "Bernard Smith", "Kevin Buckner", "Ron Fuller", "Omar Ritter", "Antonio Wilder",
-  "James Brunson", "Shon Davis", "Preston Alderman", "Andre Springer", "Marvin Jones",
-  "Andre Lipford"
+  "Damien Bryant", "Rick Anderson", "Shon Davis", "Preston Alderman", "Nelson Brower",
+  "TJ Brower", "Theron Brower", "Ron Fuller", "James Brunson", "Antonio Wilder",
+  "Jeff Coleman", "Andre Springer", "Roscoe Bryant", "Chris Bryant", "Bernard Smith",
+  "Andre Lipford", "Marvin Jones",
 ];
 
 const COURSES = [
@@ -441,7 +440,7 @@ export default function App() {
               fontFamily: "'Lato', sans-serif", fontSize: 11, letterSpacing: "0.28em",
               color: "#9ca3af", marginTop: 3, textTransform: "uppercase",
             }}>
-              Myrtle Beach · June {YEAR} · 21 Players
+              Myrtle Beach · June {YEAR} · {PLAYERS.length} Players
             </div>
             {lastUpdated && (
               <div style={{
@@ -998,7 +997,7 @@ export default function App() {
               fontFamily:"'Lato',sans-serif", fontSize:12, color:"#9ca3af",
               marginBottom:24, lineHeight:1.6,
             }}>
-              This splits 21 players into 3 flights of 7 based on their 3-round totals.
+              This splits {PLAYERS.length} players into 3 flights based on their 3-round totals.
               Flight A = best scores · B = middle · C = bottom third.
               <br/><br/>
               <strong style={{color:"#f97316"}}>This syncs live to all devices.</strong>
