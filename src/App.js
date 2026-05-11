@@ -20,7 +20,7 @@ const COURSES = [
 ];
 
 const PAR = 72;
-const YEAR = "2025";
+const YEAR = "2026";
 const ADMIN_PIN = "1234";
 
 // ─── Helpers ──────────────────────────────────────────────────
